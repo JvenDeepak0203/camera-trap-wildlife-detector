@@ -7,7 +7,12 @@ from PIL import Image
 import numpy as np
 import matplotlib.cm as cm
 import open_clip
-from megadetector.detection import run_detector
+
+try:
+    from megadetector.detection import run_detector
+    MEGADETECTOR_AVAILABLE = True
+except ImportError:
+    MEGADETECTOR_AVAILABLE = False
 
 WEIGHTS_PATH = "wildlife_detector_v5.pth"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -91,11 +96,13 @@ def get_clip_explanation(pil_image):
     ranked = sorted(zip(CANDIDATE_PHRASES, scores), key=lambda x: -x[1])
     return ranked
 
-@st.cache_resource
-def load_megadetector():
-    return run_detector.load_detector('MDV5A')
-
-md_model = load_megadetector()
+if MEGADETECTOR_AVAILABLE:
+    @st.cache_resource
+    def load_megadetector():
+        return run_detector.load_detector('MDV5A')
+    md_model = load_megadetector()
+else:
+    md_model = None
 
 st.title("Camera Trap Wildlife Detector")
 st.write("Upload a camera-trap image to check whether it contains an animal.")
@@ -174,46 +181,52 @@ if uploaded_file is not None:
     for phrase, score in clip_results[:3]:
         st.write(f"- {phrase}: {score:.1%} match")
 
-    md_result = md_model.generate_detections_one_image(image)
-    md_detections = md_result['detections']
-    # Filter MegaDetector detections to a real confidence threshold before counting
-    CONFIDENCE_THRESHOLD = 0.5
-    animal_detections = [d for d in md_detections if d['category'] == '1' and d['conf'] > CONFIDENCE_THRESHOLD]
-    md_animal_prob = max([d['conf'] for d in animal_detections], default=0.0)
-    md_animal_prob = max([d['conf'] for d in animal_detections], default=0.0)
-
-    st.markdown("**MegaDetector (purpose-built camera-trap detection model):**")
-    if animal_detections:
-        st.write(f"- Detected {len(animal_detections)} animal region(s), highest confidence: {md_animal_prob:.1%}")
-    else:
-        st.write("- No animal regions detected")
-
-    # --- Combine all three models into one final verdict ---
     resnet_animal_prob = probs[0, 1].item()
-
     clip_animal_prob = sum(score for phrase, score in clip_results if phrase in animal_phrases)
 
-    st.write(f"Debug — ResNet: {resnet_animal_prob:.1%}, CLIP: {clip_animal_prob:.1%}, MegaDetector: {md_animal_prob:.1%}")
+    if MEGADETECTOR_AVAILABLE:
+        md_result = md_model.generate_detections_one_image(image)
+        md_detections = md_result['detections']
+        CONFIDENCE_THRESHOLD = 0.5
+        animal_detections = [d for d in md_detections if d['category'] == '1' and d['conf'] > CONFIDENCE_THRESHOLD]
+        md_animal_prob = max([d['conf'] for d in animal_detections], default=0.0)
+
+        st.markdown("**MegaDetector (purpose-built camera-trap detection model):**")
+        if animal_detections:
+            st.write(f"- Detected {len(animal_detections)} animal region(s), highest confidence: {md_animal_prob:.1%}")
+        else:
+            st.write("- No animal regions detected")
+    else:
+        st.caption("MegaDetector unavailable in this environment — verdict based on ResNet + CLIP only.")
+        md_animal_prob = None
+
+    debug_md = f"{md_animal_prob:.1%}" if md_animal_prob is not None else "N/A"
+    st.write(f"Debug — ResNet: {resnet_animal_prob:.1%}, CLIP: {clip_animal_prob:.1%}, MegaDetector: {debug_md}")
 
     resnet_leans_animal = resnet_animal_prob > 0.5
     clip_leans_animal = clip_animal_prob > 0.5
-    md_leans_animal = md_animal_prob > 0.5
 
-    votes = [resnet_leans_animal, clip_leans_animal, md_leans_animal]
-    final_label = "Animal detected" if sum(votes) >= 2 else "Empty frame"
+    votes = [resnet_leans_animal, clip_leans_animal]
+    if md_animal_prob is not None:
+        votes.append(md_animal_prob > 0.5)
 
-    final_conf = (resnet_animal_prob + clip_animal_prob + md_animal_prob) / 3
+    final_label = "Animal detected" if sum(votes) > len(votes) / 2 else "Empty frame"
+
+    prob_sum = resnet_animal_prob + clip_animal_prob + (md_animal_prob if md_animal_prob is not None else 0)
+    prob_count = 3 if md_animal_prob is not None else 2
+    final_conf = prob_sum / prob_count
     if final_label == "Empty frame":
         final_conf = 1 - final_conf
 
-    models_agree = resnet_leans_animal == clip_leans_animal == md_leans_animal
+    models_agree = len(set(votes)) == 1
 
     st.divider()
     st.subheader(f"Combined verdict: {final_label} ({final_conf:.1%} confidence)")
     if models_agree:
-        st.write("✅ All three models agree on this prediction.")
+        st.write(f"✅ All {len(votes)} available models agree on this prediction.")
     else:
+        md_leans_animal = md_animal_prob > 0.5 if md_animal_prob is not None else None
         st.write("⚠️ The models disagree — treat this result with caution. "
                  f"ResNet: {'animal' if resnet_leans_animal else 'empty'} ({resnet_animal_prob:.1%}), "
-                 f"CLIP: {'animal' if clip_leans_animal else 'empty'} ({clip_animal_prob:.1%}), "
-                 f"MegaDetector: {'animal' if md_leans_animal else 'empty'} ({md_animal_prob:.1%}).")
+                 f"CLIP: {'animal' if clip_leans_animal else 'empty'} ({clip_animal_prob:.1%})"
+                 + (f", MegaDetector: {'animal' if md_leans_animal else 'empty'} ({md_animal_prob:.1%})." if md_animal_prob is not None else "."))
