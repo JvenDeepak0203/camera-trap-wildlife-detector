@@ -1,5 +1,8 @@
 torch
 torchvision
-gradio
-pillow
 streamlit
+pillow
+numpy
+matplotlib
+open_clip_torch
+megadetector

@@ -6,7 +6,7 @@ import gradio as gr
 import os
 
 # --- Setup ---
-WEIGHTS_PATH = "wildlife_detector_v2.pth"  # must be in the same folder as this script
+WEIGHTS_PATH = "wildlife_detector_v5.pth"  # must be in the same folder as this script
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 transform = transforms.Compose([
