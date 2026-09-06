@@ -8,15 +8,15 @@ import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import open_clip
-
-try:
-    from megadetector.detection import run_detector
-    MEGADETECTOR_AVAILABLE = True
-except ImportError:
-    MEGADETECTOR_AVAILABLE = False
+import os
+import urllib.request
 
 WEIGHTS_PATH = "wildlife_detector_v5.pth"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+MD_WEIGHTS_PATH = "md_v5a.0.0.pt"
+MD_WEIGHTS_URL = "https://github.com/agentmorris/MegaDetector/releases/download/v5.0/md_v5a.0.0.pt"
+MEGADETECTOR_AVAILABLE = True  # will flip to False below if loading genuinely fails
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -108,18 +108,25 @@ def draw_detection_boxes(pil_image, detections):
     draw = ImageDraw.Draw(img_copy)
     w, h = img_copy.size
     for d in detections:
-        x, y, bw, bh = d['bbox']
-        left, top = x * w, y * h
-        right, bottom = (x + bw) * w, (y + bh) * h
+        left, top, right, bottom = float(d[0]), float(d[1]), float(d[2]), float(d[3])
+        conf = float(d[4])
         draw.rectangle([left, top, right, bottom], outline='#ff3b30', width=max(3, w // 150))
-        draw.text((left + 4, max(top - 18, 0)), f"{d['conf']:.0%}", fill='#ff3b30')
+        draw.text((left + 4, max(top - 18, 0)), f"{conf:.0%}", fill='#ff3b30')
     return img_copy
 
 if MEGADETECTOR_AVAILABLE:
     @st.cache_resource
     def load_megadetector():
-        return run_detector.load_detector('MDV5A')
+        try:
+            if not os.path.exists(MD_WEIGHTS_PATH):
+                urllib.request.urlretrieve(MD_WEIGHTS_URL, MD_WEIGHTS_PATH)
+            return torch.hub.load('ultralytics/yolov5', 'custom', path=MD_WEIGHTS_PATH, trust_repo=True)
+        except Exception as e:
+            st.error(f"MegaDetector failed to load: {e}")
+            return None
     md_model = load_megadetector()
+    if md_model is None:
+        MEGADETECTOR_AVAILABLE = False
 else:
     md_model = None
 
@@ -199,14 +206,15 @@ if uploaded_file is not None:
 
     # --- Model 3: MegaDetector ---
     if MEGADETECTOR_AVAILABLE:
-        md_result = md_model.generate_detections_one_image(image)
-        md_detections = md_result['detections']
+        md_results = md_model(image)
+        detections = md_results.xyxy[0]
         CONFIDENCE_THRESHOLD = 0.5
-        md_animal_detections = [d for d in md_detections if d['category'] == '1' and d['conf'] > CONFIDENCE_THRESHOLD]
-        md_animal_prob = max([d['conf'] for d in md_animal_detections], default=0.0)
-        md_boxed_image = draw_detection_boxes(image, md_animal_detections) if md_animal_detections else None
+        # MegaDetector's classes: 0 = animal, 1 = person, 2 = vehicle
+        md_animal_detections = [d for d in detections if int(d[5]) == 0 and float(d[4]) > CONFIDENCE_THRESHOLD]
+        md_animal_prob = max([float(d[4]) for d in md_animal_detections], default=0.0)
+        md_boxed_image = draw_detection_boxes(image, md_animal_detections) if len(md_animal_detections) > 0 else None
     else:
-        md_animal_detections = None
+        md_animal_detections = []
         md_animal_prob = None
         md_boxed_image = None
 
@@ -292,7 +300,7 @@ if uploaded_file is not None:
     if MEGADETECTOR_AVAILABLE:
         md_leans_animal = md_animal_prob > 0.5
         st.markdown(f"**Result:** {'Animal detected' if md_leans_animal else 'Empty frame'} ({(md_animal_prob if md_leans_animal else 1 - md_animal_prob):.1%} confidence)")
-        if md_animal_detections:
+        if len(md_animal_detections) > 0:
             st.image(md_boxed_image, caption=f"{len(md_animal_detections)} animal region(s) detected", use_container_width=True)
         else:
             st.image(image, caption="No animal regions detected", use_container_width=True)

@@ -5,4 +5,11 @@ pillow
 numpy
 matplotlib
 open_clip_torch
-megadetector
+pyyaml
+requests
+pandas
+seaborn
+tqdm
+scipy
+opencv-python-headless
+ultralytics
