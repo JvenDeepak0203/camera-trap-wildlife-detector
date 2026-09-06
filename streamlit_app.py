@@ -3,9 +3,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms, models
-from PIL import Image
+from PIL import Image, ImageDraw
 import numpy as np
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 import open_clip
 
 try:
@@ -71,6 +72,10 @@ CANDIDATE_PHRASES = [
     "a photo showing fur or skin texture of an animal",
     "a wide shot of an animal's full body in a natural landscape",
     "a photograph of a wild animal walking or moving in its habitat",
+    "a photo showing multiple animals together",
+    "a black and white night-vision photo of an animal",
+    "a photo of a person, not an animal",
+    "a photo of a vehicle, not an animal",
     "a blurry photo with no visible animal, just background",
     "a photo of an inanimate object, not an animal",
 ]
@@ -81,6 +86,8 @@ animal_phrases = {
     "a photo showing fur or skin texture of an animal",
     "a wide shot of an animal's full body in a natural landscape",
     "a photograph of a wild animal walking or moving in its habitat",
+    "a photo showing multiple animals together",
+    "a black and white night-vision photo of an animal",
 }
 
 def get_clip_explanation(pil_image):
@@ -95,6 +102,18 @@ def get_clip_explanation(pil_image):
     scores = similarity[0].tolist()
     ranked = sorted(zip(CANDIDATE_PHRASES, scores), key=lambda x: -x[1])
     return ranked
+
+def draw_detection_boxes(pil_image, detections):
+    img_copy = pil_image.copy()
+    draw = ImageDraw.Draw(img_copy)
+    w, h = img_copy.size
+    for d in detections:
+        x, y, bw, bh = d['bbox']
+        left, top = x * w, y * h
+        right, bottom = (x + bw) * w, (y + bh) * h
+        draw.rectangle([left, top, right, bottom], outline='#ff3b30', width=max(3, w // 150))
+        draw.text((left + 4, max(top - 18, 0)), f"{d['conf']:.0%}", fill='#ff3b30')
+    return img_copy
 
 if MEGADETECTOR_AVAILABLE:
     @st.cache_resource
@@ -111,6 +130,14 @@ uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
+
+    progress = st.progress(0, text="Running ResNet18...")
+
+    # ============================================================
+    # STEP 1 — Run all three models silently, collect every result
+    # ============================================================
+
+    # --- Model 1: ResNet ---
     img_t = transform(image).unsqueeze(0).to(device)
     img_t.requires_grad_()
 
@@ -118,8 +145,9 @@ if uploaded_file is not None:
     TEMPERATURE = 1.785
     probs = torch.softmax(output / TEMPERATURE, dim=1)
     pred = output.argmax(dim=1).item()
-    conf = probs[0, pred].item()
-    label = "Animal detected" if pred == 1 else "Empty frame"
+    resnet_conf = probs[0, pred].item()
+    resnet_label = "Animal detected" if pred == 1 else "Empty frame"
+    resnet_animal_prob = probs[0, 1].item()
 
     model.zero_grad()
     output[0, pred].backward()
@@ -140,10 +168,7 @@ if uploaded_file is not None:
     peak_y, peak_x = np.unravel_index(cam.argmax(), cam.shape)
     vertical = "top" if peak_y < h/3 else "bottom" if peak_y > 2*h/3 else "middle"
     horizontal = "left" if peak_x < w/3 else "right" if peak_x > 2*w/3 else "center"
-    if vertical == "middle" and horizontal == "center":
-        focus_area = "the center of the image"
-    else:
-        focus_area = f"the {vertical}-{horizontal} region of the image"
+    focus_area = "the center of the image" if (vertical == "middle" and horizontal == "center") else f"the {vertical}-{horizontal} region of the image"
 
     hot_fraction = (cam > 0.7).sum() / cam.size
     if hot_fraction < 0.05:
@@ -153,55 +178,44 @@ if uploaded_file is not None:
     else:
         spread_desc = "a large, spread-out area with no single clear focal point"
 
-    st.markdown(f"""
-    **Detail:** the model's attention was concentrated on **{spread_desc}**, centered around
-    **{focus_area}**. Combined with a **{conf:.1%}** confidence score, this suggests the model
-    {"found a strong, spatially specific visual pattern to base its decision on" if hot_fraction < 0.20 and conf > 0.85
-     else "found some signal, but the attention pattern is broad or the confidence is only moderate — a sign the image may not closely resemble typical training examples" if conf < 0.85 or hot_fraction >= 0.20
-     else "made a reasonably confident decision based on a moderately localized region"}.
-    """)
+    resnet_detail = (
+        f"The model's attention was concentrated on **{spread_desc}**, centered around **{focus_area}**. "
+        + ("This suggests a strong, spatially specific visual pattern drove the decision."
+           if hot_fraction < 0.20 and resnet_conf > 0.85
+           else "This suggests the attention pattern is broad or the confidence is only moderate — a sign the image may not closely resemble typical training examples."
+           if resnet_conf < 0.85 or hot_fraction >= 0.20
+           else "This suggests a reasonably confident decision based on a moderately localized region.")
+    )
 
     overlay_image = overlay_heatmap(cam, image)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(image, caption="Uploaded image", use_container_width=True)
-    with col2:
-        st.image(overlay_image, caption="Where the model looked", use_container_width=True)
+    progress.progress(33, text="Running CLIP...")
 
-    st.subheader(f"{label} ({conf:.1%} confidence)")
-    st.caption(
-        "Red/yellow regions show where the model focused most when making this "
-        "prediction. This doesn't mean the model 'knows' concepts like eyes or "
-        "silhouettes — it shows which pixels most influenced the output."
-    )
-
+    # --- Model 2: CLIP ---
     clip_results = get_clip_explanation(image)
-    st.markdown("**Visual features detected (via CLIP, a separate model trained on image-text pairs):**")
-    for phrase, score in clip_results[:3]:
-        st.write(f"- {phrase}: {score:.1%} match")
-
-    resnet_animal_prob = probs[0, 1].item()
     clip_animal_prob = sum(score for phrase, score in clip_results if phrase in animal_phrases)
 
+    progress.progress(66, text="Running MegaDetector..." if MEGADETECTOR_AVAILABLE else "Skipping MegaDetector (unavailable)...")
+
+    # --- Model 3: MegaDetector ---
     if MEGADETECTOR_AVAILABLE:
         md_result = md_model.generate_detections_one_image(image)
         md_detections = md_result['detections']
         CONFIDENCE_THRESHOLD = 0.5
-        animal_detections = [d for d in md_detections if d['category'] == '1' and d['conf'] > CONFIDENCE_THRESHOLD]
-        md_animal_prob = max([d['conf'] for d in animal_detections], default=0.0)
-
-        st.markdown("**MegaDetector (purpose-built camera-trap detection model):**")
-        if animal_detections:
-            st.write(f"- Detected {len(animal_detections)} animal region(s), highest confidence: {md_animal_prob:.1%}")
-        else:
-            st.write("- No animal regions detected")
+        md_animal_detections = [d for d in md_detections if d['category'] == '1' and d['conf'] > CONFIDENCE_THRESHOLD]
+        md_animal_prob = max([d['conf'] for d in md_animal_detections], default=0.0)
+        md_boxed_image = draw_detection_boxes(image, md_animal_detections) if md_animal_detections else None
     else:
-        st.caption("MegaDetector unavailable in this environment — verdict based on ResNet + CLIP only.")
+        md_animal_detections = None
         md_animal_prob = None
+        md_boxed_image = None
 
-    debug_md = f"{md_animal_prob:.1%}" if md_animal_prob is not None else "N/A"
-    st.write(f"Debug — ResNet: {resnet_animal_prob:.1%}, CLIP: {clip_animal_prob:.1%}, MegaDetector: {debug_md}")
+    progress.progress(100, text="Done!")
+    progress.empty()
+
+    # ============================================================
+    # STEP 2 — Combine into final verdict
+    # ============================================================
 
     resnet_leans_animal = resnet_animal_prob > 0.5
     clip_leans_animal = clip_animal_prob > 0.5
@@ -220,13 +234,74 @@ if uploaded_file is not None:
 
     models_agree = len(set(votes)) == 1
 
-    st.divider()
-    st.subheader(f"Combined verdict: {final_label} ({final_conf:.1%} confidence)")
+    # ============================================================
+    # STEP 3 — Display: big verdict first, then each model in order
+    # ============================================================
+
+    verdict_color = "#2e7d32" if final_label == "Animal detected" else "#616161"
+    st.markdown(
+        f"<h1 style='text-align:center; color:{verdict_color};'>{final_label}</h1>"
+        f"<p style='text-align:center; font-size:1.3rem;'>{final_conf:.1%} confidence</p>",
+        unsafe_allow_html=True
+    )
     if models_agree:
-        st.write(f"✅ All {len(votes)} available models agree on this prediction.")
+        st.markdown(f"<p style='text-align:center;'>✅ All {len(votes)} available models agree</p>", unsafe_allow_html=True)
     else:
-        md_leans_animal = md_animal_prob > 0.5 if md_animal_prob is not None else None
-        st.write("⚠️ The models disagree — treat this result with caution. "
-                 f"ResNet: {'animal' if resnet_leans_animal else 'empty'} ({resnet_animal_prob:.1%}), "
-                 f"CLIP: {'animal' if clip_leans_animal else 'empty'} ({clip_animal_prob:.1%})"
-                 + (f", MegaDetector: {'animal' if md_leans_animal else 'empty'} ({md_animal_prob:.1%})." if md_animal_prob is not None else "."))
+        st.markdown("<p style='text-align:center;'>⚠️ Models disagree — see breakdown below</p>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- Model 1: ResNet ---
+    st.subheader("Model 1: ResNet18")
+    st.caption("A convolutional neural network fine-tuned on labeled camera-trap images to distinguish animal frames from empty ones.")
+    st.markdown(f"**Result:** {resnet_label} ({resnet_conf:.1%} confidence)")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(image, caption="Uploaded image", use_container_width=True)
+    with col2:
+        st.image(overlay_image, caption="Where the model looked", use_container_width=True)
+    st.caption(resnet_detail)
+    st.caption(
+        "Red/yellow regions show where the model focused most. This doesn't mean "
+        "the model 'knows' concepts like eyes or silhouettes — it shows which "
+        "pixels most influenced the output."
+    )
+
+    st.divider()
+
+    # --- Model 2: CLIP ---
+    st.subheader("Model 2: CLIP")
+    st.caption("A general-purpose vision-language model that scores how well the image matches a set of descriptive phrases.")
+    st.markdown(f"**Result:** {'Animal detected' if clip_leans_animal else 'Empty frame'} ({(clip_animal_prob if clip_leans_animal else 1 - clip_animal_prob):.1%} confidence)")
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    phrases = [p for p, _ in clip_results]
+    scores = [s * 100 for _, s in clip_results]
+    ax.barh(phrases, scores, color='#4a90d9')
+    ax.set_xlabel('Match %')
+    ax.set_xlim(0, 100)
+    ax.invert_yaxis()
+    plt.tight_layout()
+    st.pyplot(fig)
+
+    st.divider()
+
+    # --- Model 3: MegaDetector ---
+    st.subheader("Model 3: MegaDetector")
+    st.caption("A detection model built specifically for camera-trap images by conservation-tech researchers, locating animals, people, and vehicles.")
+    if MEGADETECTOR_AVAILABLE:
+        md_leans_animal = md_animal_prob > 0.5
+        st.markdown(f"**Result:** {'Animal detected' if md_leans_animal else 'Empty frame'} ({(md_animal_prob if md_leans_animal else 1 - md_animal_prob):.1%} confidence)")
+        if md_animal_detections:
+            st.image(md_boxed_image, caption=f"{len(md_animal_detections)} animal region(s) detected", use_container_width=True)
+        else:
+            st.image(image, caption="No animal regions detected", use_container_width=True)
+    else:
+        st.markdown("**Result:** Not used")
+        st.caption("MegaDetector was unavailable in this environment, so this model was skipped. The final verdict above is based on the remaining available models.")
+
+    st.divider()
+
+    # --- Summary of models used ---
+    md_icon = "✅" if MEGADETECTOR_AVAILABLE else "❌"
+    st.markdown(f"**Models used for this analysis:** ResNet18 (✅), CLIP (✅), MegaDetector ({md_icon})")
