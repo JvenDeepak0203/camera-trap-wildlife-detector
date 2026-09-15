@@ -131,5 +131,5 @@ This leans heavily on other people's work:
 - [iWildCam 2020](https://www.kaggle.com/c/iwildcam-2020-fgvc7), which earlier
   versions of my model were trained on
 
-This is a portfolio and research project, not something a conservation org should
+This is a portfolio and research project, not something a conservation organization should
 depend on.
