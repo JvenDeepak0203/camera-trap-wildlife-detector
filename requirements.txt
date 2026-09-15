@@ -8,7 +8,6 @@ open_clip_torch
 pyyaml
 requests
 pandas
-seaborn
 tqdm
 scipy
 opencv-python-headless
