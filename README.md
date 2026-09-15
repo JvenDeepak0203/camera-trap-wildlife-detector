@@ -1,85 +1,91 @@
 # Camera Trap Wildlife Detector
 
-Most camera-trap photographs are empty. This tool tells you which ones aren't.
+Most camera-trap photographs are empty. This tells you which ones aren't.
 
-Camera traps fire on motion, and most of what they capture is vegetation moving or a
-shadow shifting. Researchers review all of it by hand. This system scores each frame
-on how likely it is to contain an animal, so the empty ones can be set aside.
+**Live demo:** https://camera-trap-wildlife-detector.streamlit.app
 
-**96.2% accuracy** on 2,961 images from 314 camera locations excluded from all
-training and tuning.
+Camera traps fire whenever something moves, so most of what they record is grass
+blowing or a shadow shifting. Someone still has to look through all of it. This
+scores every frame on how likely it is to have an animal in it, so the empty ones
+can be skipped.
+
+It gets that call right **96.2%** of the time on cameras it has never seen.
 
 ---
 
 ## How it works
 
-Two models score each image and their scores are blended:
+I use two models and blend their scores:
 
-| Model | Role | Weight |
+| Model | What it does | Share of the verdict |
 |---|---|---|
-| **ResNet18 v6-320** | Classifier fine-tuned on WCS camera-trap data | 30% |
-| **MegaDetector v5a** | Purpose-built camera-trap detector | 70% |
+| **ResNet18 v6-320** | A classifier I fine-tuned on WCS camera-trap images | 30% |
+| **MegaDetector v5a** | A detector built specifically for camera traps | 70% |
 
-Scores are combined as `0.3 × resnet + 0.7 × megadetector` and thresholded at 0.275.
-Both the weighting and the threshold were found by sweeping every value against a
-validation set, then confirmed on data neither had touched.
+The final score is `0.3 × resnet + 0.7 × megadetector`, and anything above 0.275
+counts as an animal. I found both the weighting and the cutoff by sweeping every
+value against a validation set, then checked them on data neither had seen.
 
-**CLIP** (ViT-B-32) is shown alongside as a plain-language scene description, but
-takes no part in the verdict. Measured at 0.897 AUC after phrase optimization, it is
-well short of the two scoring models.
+**CLIP** is also in the app, matching each photo against plain-English descriptions,
+but it doesn't vote. I tested it properly and it isn't good enough at this: 0.897
+AUC even after optimising the phrase list, against 0.969 and 0.963 for the other two.
 
-Grad-CAM shows which pixels drove the classifier's decision. MegaDetector's bounding
-boxes show where it found candidate regions. Disagreement between the two scoring
-models is flagged rather than hidden.
+The app also shows a Grad-CAM heatmap of what the classifier was looking at,
+MegaDetector's bounding boxes, and a warning when the two scoring models disagree.
 
 ---
 
-## Results
+## How well it actually works
 
-On the held-out test split of 314 camera locations that appear nowhere in training
-and were never used to tune any parameter:
+Tested on 2,961 images from 314 camera locations that were kept out of training and
+out of every tuning decision:
 
 | | AUC | Accuracy |
 |---|---|---|
-| ResNet18 v6 alone | 0.9669 | n/a |
-| MegaDetector alone | 0.9687 | n/a |
-| **Blended** | **0.9909** | **96.15%** |
+| ResNet18 v6 on its own | 0.9669 | n/a |
+| MegaDetector on its own | 0.9687 | n/a |
+| **Both blended** | **0.9909** | **96.15%** |
 
-MegaDetector alone outperforms this project's classifier. The blend beats both
-because the two models fail on different images.
+Accuracy is only listed for the blend because it's the only one with a threshold
+tuned for it. MegaDetector on its own actually scores slightly higher than my model
+does. The point isn't that mine is better; it's that the two fail on different
+images, so putting them together beats either one.
 
 ---
 
-## Notable findings
+## Things I found along the way
 
-**Random splits inflate camera-trap accuracy by about nine points.** An earlier
-version of this project reported 87–88% on a random split. Re-measured on a
-location-disjoint split, the same model scored 78.8%. Frames from one camera share
-background and lighting and often arrive in bursts, so a random split lets a model
-score well by recognising backgrounds.
+**My earlier accuracy numbers were wrong.** I'd been reporting 87-88%, using a
+random train/test split. But photos from the same camera share the same background
+and often come in bursts a few seconds apart, so a random split puts near-identical
+frames on both sides and the model can score well just by recognising backgrounds.
+When I split by camera location instead, the same model got **78.8%**. Nine points
+of my reported accuracy was leakage.
 
-**Detection fails sharply below 5% of frame.** Recall holds near 0.90 for animals
-occupying more than 5% of the image and collapses to 0.485 below 1%. About 73% of all
-missed animals are small ones. The cause is the resize step: an animal filling 1% of
-a frame survives resizing as a patch smaller than a single cell of the network's final
-feature map.
+**There's a sharp cliff at 5% of frame.** Recall sits around 0.90 for animals taking
+up more than 5% of the image and falls off a cliff to 0.485 below 1%. About 73% of
+everything the model misses is a small animal. The reason is the resize step: an
+animal filling 1% of a frame ends up as a patch smaller than one cell of the
+network's final feature map, so the detail is gone before the model sees it.
 
-**Raising resolution at inference time makes things worse, not better.** Predicted to
-help small animals, it instead degraded recall in every size bin, because calibration
-collapses faster than discrimination improves. A paired bootstrap showed the
-underlying signal was real but masked; fine-tuning at 320×320 converted it into
-+0.0236 AUC on small animals, against a predicted +0.0215.
+**Bigger input images made things worse, not better.** I expected higher resolution
+to help with small animals. It didn't. Recall dropped in every size bin, including
+large animals where extra pixels can't possibly matter. What was happening was
+calibration collapse: the model had been trained at one resolution and got confused
+at another. A bootstrap showed the small-animal gain was real but buried, and
+retraining at 320x320 brought it out: +0.0236 AUC, against +0.0215 predicted.
 
-**A better classifier did not make a better ensemble.** A ResNet50 backbone was
-significantly stronger alone (+0.0071 AUC, p ≈ 1.0) but produced no improvement to
-the blend, because its gains were redundant with MegaDetector's existing strengths.
+**A better model didn't make a better ensemble.** ResNet50 beat ResNet18 clearly on
+its own. But blending it with MegaDetector gave 0.9876 against 0.9878 for the
+smaller model, so no improvement at all. Its gains were in places MegaDetector
+already handled well, and an ensemble only benefits when its parts fail differently.
 
-Full experimental history, including three negative results, is in
+Everything I tried, including three experiments that didn't work, is written up in
 [REPORT.md](REPORT.md).
 
 ---
 
-## Running it locally
+## Running it yourself
 
 ```bash
 git clone https://github.com/JvenDeepak0203/camera-trap-detector.git
@@ -91,20 +97,21 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The ResNet weights (`v6_320.pth`, 45 MB) ship with the repo. MegaDetector's weights
-(280 MB) download automatically on first run.
+My weights (`v6_320.pth`, 45 MB) are in the repo. MegaDetector's are 280 MB and
+download on first run, so the first launch is slow.
 
 ---
 
-## Limitations
+## What it can't do
 
-- Animals under 5% of frame are detected substantially less reliably
-- Presence/absence only, no species identification
-- No "uncertain" output; every image is forced into one of two labels
-- People and vehicles count as *not animals*, following the source dataset
-- Unreliable on anything that isn't camera-trap imagery
-- Realistic replicas and decoys are classified as animals
-- Geographic coverage is that of the WCS dataset; transfer elsewhere is unverified
+- Small animals, under about 5% of the frame, are much less reliable
+- It only says animal or empty, it doesn't identify species
+- There's no "not sure" option, every image gets forced into one of the two
+- People and vehicles count as *not animals*, which is how the source data labels them
+- Anything that isn't a camera-trap photo (macro shots, landscapes, studio images)
+  gives unreliable results
+- A realistic decoy or a taxidermy mount will be called an animal
+- It's only been tested on WCS data, so I can't say how it does elsewhere
 
 ---
 
@@ -112,14 +119,17 @@ The ResNet weights (`v6_320.pth`, 45 MB) ship with the repo. MegaDetector's weig
 
 Built by Jven Deepak.
 
+This leans heavily on other people's work:
+
 - [MegaDetector v5a](https://github.com/agentmorris/MegaDetector) by Dan Morris and
-  contributors, developed at Microsoft AI for Earth, now community-maintained
+  contributors, built at Microsoft AI for Earth and now community-maintained
 - [WCS Camera Traps](https://lila.science/datasets/wcscameratraps), 1.37M images
-  contributed by the [Wildlife Conservation Society](https://www.wcs.org/), hosted by
-  [LILA BC](https://lila.science/) under the Community Data License Agreement
+  contributed by the [Wildlife Conservation Society](https://www.wcs.org/) and hosted
+  by [LILA BC](https://lila.science/) under the Community Data License Agreement
 - [OpenCLIP](https://github.com/mlfoundations/open_clip) (ViT-B-32) by LAION and
   contributors
-- [iWildCam 2020](https://www.kaggle.com/c/iwildcam-2020-fgvc7), used for earlier
-  model versions
+- [iWildCam 2020](https://www.kaggle.com/c/iwildcam-2020-fgvc7), which earlier
+  versions of my model were trained on
 
-A research and portfolio project, not a production conservation tool.
+This is a portfolio and research project, not something a conservation org should
+depend on.
