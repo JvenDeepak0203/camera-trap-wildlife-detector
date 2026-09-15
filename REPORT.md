@@ -1,6 +1,6 @@
 # Development Report
 
-Camera Trap Wildlife Detector — full development history, experiments, and findings.
+Camera Trap Wildlife Detector: full development history, experiments, and findings.
 
 ---
 
@@ -61,17 +61,17 @@ stated otherwise.
 
 | Version | Change | AUC | AUC (small animals) | Accuracy |
 |---|---|---|---|---|
-| v2 | fc-layer only, iWildCam, 3,000 images | — | — | 84%* |
-| v3 | Unfroze layer4, augmentation, hard-location oversampling | — | — | 88.3%* |
-| v4 | + hard negative mining (268 examples, 5× weight) | — | — | 88.4%* |
-| v5 | + expanded hard negatives (1,111 examples, 8× weight) | — | — | 88%* / **78.8%** |
+| v2 | fc-layer only, iWildCam, 3,000 images | n/a | n/a | 84%* |
+| v3 | Unfroze layer4, augmentation, hard-location oversampling | n/a | n/a | 88.3%* |
+| v4 | + hard negative mining (268 examples, 5× weight) | n/a | n/a | 88.4%* |
+| v5 | + expanded hard negatives (1,111 examples, 8× weight) | n/a | n/a | 88%* / **78.8%** |
 | **v6-320** | **WCS data, 320×320 input, location-disjoint splits** | **0.9686** | **0.9369** | **90.8%** |
 | v7 | v6 + WCS-mined hard negatives (767, 3× weight) | 0.9643 | 0.9291 | 89.0% |
-| v8ctrl | Small-animal rebalancing, 8,000 images | 0.9618 | 0.9286 | — |
-| v8 | Small-animal rebalancing, 20,000 images | 0.9690 | 0.9404 | — |
-| r50 | ResNet50 backbone, 20,000 images | 0.9757 | 0.9546 | — |
+| v8ctrl | Small-animal rebalancing, 8,000 images | 0.9618 | 0.9286 | n/a |
+| v8 | Small-animal rebalancing, 20,000 images | 0.9690 | 0.9404 | n/a |
+| r50 | ResNet50 backbone, 20,000 images | 0.9757 | 0.9546 | n/a |
 
-\* measured on a **random** split — see §4, these figures are inflated.
+\* measured on a **random** split. See §4; these figures are inflated.
 
 **v6-320 is the deployed model.** v8 was statistically tied with it; r50 was better
 alone but added nothing to the ensemble (§9).
@@ -83,7 +83,7 @@ alone but added nothing to the ensemble (§9).
 The first significant finding of this project was that its own earlier accuracy
 figures were wrong.
 
-Versions v2 through v5 were evaluated with `train_test_split(..., stratify=...)` —
+Versions v2 through v5 were evaluated with `train_test_split(..., stratify=...)`,
 a random split. Camera-trap photographs from the same camera share background,
 vegetation and lighting, and frequently arrive in bursts seconds apart. A random
 split places near-identical frames on both sides, so a model can score well by
@@ -126,7 +126,7 @@ v6's predecessor (v5) evaluated by size bin:
 | > 25% | 282 | 0.897 | 0.879 |
 
 Recall is flat at approximately 0.90 above 5% of frame, then collapses. Below 1%,
-the model is worse than a coin flip, and mean confidence sits at 0.518 — it is not
+the model is worse than a coin flip, and mean confidence sits at 0.518. It is not
 confidently wrong, it is undecided.
 
 The flatness above 5% is what makes this a threshold rather than a trend. A gradual
@@ -150,7 +150,7 @@ The size cliff largely *is* the accuracy gap.
 improve small-animal detection. `layer4` at 448 gives a 14×14 grid, so an animal at
 1% of frame goes from sub-cell to roughly 2×2 cells.
 
-### 6a. Inference-time test — hypothesis falsified
+### 6a. Inference-time test: hypothesis falsified
 
 Same v5 weights, same images, three input sizes:
 
@@ -167,10 +167,10 @@ possibly help. Median p(animal) on true animals fell **0.928 → 0.815 → 0.614
 
 **Diagnosis: train/test resolution discrepancy.** The weights were fine-tuned at 224.
 At 448, every learned feature is being asked about textures and apparent object
-scales it never saw. The entire probability distribution shifted toward "empty" —
-a global calibration collapse, not a size-specific effect.
+scales it never saw. The entire probability distribution shifted toward "empty",
+a global calibration collapse rather than a size-specific effect.
 
-### 6b. Threshold-independent check — signal recovered
+### 6b. Threshold-independent check: signal recovered
 
 Accuracy comparisons across resolutions partly measure where the fixed 0.5 threshold
 happens to land. AUC ignores the threshold:
@@ -189,10 +189,10 @@ AUC<5%:  320 - 224 = +0.0215   95% CI [+0.0037, +0.0399]   P(better) = 0.990
 AUC<5%:  448 - 224 = -0.0100   95% CI [-0.0321, +0.0121]   P(better) = 0.184
 ```
 
-320 is a genuine improvement. 448 is inconclusive — point estimate negative, but the
-interval crosses zero, so no claim of a confirmed reversal.
+320 is a genuine improvement. 448 is inconclusive: the point estimate is negative,
+but the interval crosses zero, so no claim of a confirmed reversal.
 
-### 6c. Fine-tuning at 320 — prediction confirmed
+### 6c. Fine-tuning at 320: prediction confirmed
 
 If the mechanism is correct, fine-tuning at 320 should convert the masked gain into
 real performance. Identical data, seed, and schedule; only input size differs:
@@ -227,7 +227,7 @@ Cost: 320×320 is roughly 2× the inference compute of 224×224. The gain is not
 
 ---
 
-## 7. Experiment: hard negative mining (v7) — negative result
+## 7. Experiment: hard negative mining (v7), a negative result
 
 v5's shape-based false positives (the "popcorn problem") were fixed by mining images
 the model confidently misclassified and oversampling them. v6, trained on WCS
@@ -251,13 +251,13 @@ t = 0.2 it matches v6's empty recall (0.9154 vs 0.9133) while missing 2.2 points
 animals. AUC confirms it independently. The hard negatives did not improve the
 trade-off curve; they shifted the model along a slightly worse one.
 
-**Likely cause.** The negatives were mined from *training* locations — cameras v6
+**Likely cause.** The negatives were mined from *training* locations, cameras v6
 had already seen. Those errors are probably idiosyncratic scene details rather than
 generalizable failure modes. Where you mine from matters as much as how you weight.
 
 ---
 
-## 8. Experiment: small-animal rebalancing (v8) — null result
+## 8. Experiment: small-animal rebalancing (v8), a null result
 
 **Hypothesis.** Since 73% of misses are small animals, over-representing them in
 training should help.
@@ -282,7 +282,7 @@ AUC all:  +0.0004   95% CI [-0.0028, +0.0037]   P(v8 better) = 0.595
 AUC<5%:   +0.0036   95% CI [-0.0036, +0.0103]   P(v8 better) = 0.847
 ```
 
-Both intervals straddle zero — statistically indistinguishable from v6. v6 was kept,
+Both intervals straddle zero, so v8 is statistically indistinguishable from v6. v6 was kept,
 since swapping models on a tie would mean re-deriving the temperature, ensemble
 weights and threshold for no measured gain.
 
@@ -292,7 +292,7 @@ world where 69% of animals are tiny, then is tested in one where 40% are.
 
 ---
 
-## 9. Experiment: ResNet50 backbone — better alone, no ensemble gain
+## 9. Experiment: ResNet50 backbone, better alone but no ensemble gain
 
 ResNet50, ImageNet-pretrained, `layer4` and `fc` unfrozen, same 20k data and
 schedule. Best epoch by validation AUC:
@@ -343,7 +343,7 @@ Combination rules:
 
 | Rule | AUC | Accuracy |
 |---|---|---|
-| Majority vote (3 models) | — | 0.9372 |
+| Majority vote (3 models) | n/a | 0.9372 |
 | ResNet + CLIP, averaged | 0.9656 | 0.8367 |
 | All three, averaged | 0.9849 | 0.9409 |
 | **ResNet + MegaDetector, averaged** | **0.9869** | 0.9372 |
@@ -382,7 +382,7 @@ just below that cliff is not a coincidence.
 
 CLIP's original phrase list was 7 animal phrases against 4 non-animal, softmaxed
 together. An indifferent CLIP therefore scores about 0.64, above the 0.5 threshold,
-and votes "animal" by default — empty recall was 6.3%.
+and votes "animal" by default. Empty recall was 6.3%.
 
 A greedy forward search over 32 candidate phrases (16 animal, 16 empty):
 
@@ -393,7 +393,7 @@ A greedy forward search over 32 candidate phrases (16 animal, 16 empty):
 | All candidates (16a/16e) | **0.7419** | 0.538 | 0.758 |
 | Animal-heavy (16a/8e) | 0.8743 | 0.048 | 0.990 |
 | Empty-heavy (8a/16e) | 0.7610 | 0.776 | 0.639 |
-| **Greedy-optimal (10a/5e)** | **0.8967** | — | — |
+| **Greedy-optimal (10a/5e)** | **0.8967** | n/a | n/a |
 
 Two findings:
 
@@ -416,11 +416,11 @@ engineering closes that gap.
 
 | Image | Combined | ResNet | MegaDetector | Note |
 |---|---|---|---|---|
-| Leaf-mimic geckos (macro) | — | 97.3% | no detection | Classification and detection diverge: MegaDetector must resolve an object boundary, which leaf-mimic camouflage defeats. Out-of-distribution for both. |
+| Leaf-mimic geckos (macro) | n/a | 97.3% | no detection | Classification and detection diverge: MegaDetector must resolve an object boundary, which leaf-mimic camouflage defeats. Out-of-distribution for both. |
 | Silver pheasants (camera trap) | high | 100% | 95.1% | Both agree. Real camera-trap imagery, in-distribution. |
-| Clouded leopard (camera trap) | 45.7% | **4.5%** | 63.4% | The ensemble rescuing a ResNet miss. Small, camouflaged animal — exactly the failure mode §5 predicts. |
+| Clouded leopard (camera trap) | 45.7% | **4.5%** | 63.4% | The ensemble rescuing a ResNet miss. Small, camouflaged animal, exactly the failure mode §5 predicts. |
 | Hazy landscape with two people | 15.8% | 52.5% | 0.0% | Correctly empty: people are labelled not-animal. ResNet uncertain, MegaDetector decisive. |
-| Popcorn (synthetic OOD probe) | — | 72.8% | ~0% | v5 scored 7.8% here after hard-negative mining; v6 regressed. Not camera-trap data — see §7. |
+| Popcorn (synthetic OOD probe) | n/a | 72.8% | ~0% | v5 scored 7.8% here after hard-negative mining; v6 regressed. Not camera-trap data; see §7. |
 
 ---
 
@@ -433,8 +433,8 @@ engineering closes that gap.
 - **People and vehicles are labelled not-animal**, following the source dataset.
 - **Out-of-distribution imagery** (macro photography, landscapes, studio images,
   stylised images) gives unreliable results.
-- **Realistic replicas** — decoys, taxidermy, mechanical models — are classified as
-  animals. The system reasons from pixels and has no access to physical context.
+- **Realistic replicas** such as decoys, taxidermy and mechanical models are
+  classified as animals. The system reasons from pixels and has no access to physical context.
 - **Geographic coverage** is that of the WCS dataset: 12 countries, largely South
   American, African and Asian sites. Transfer elsewhere is unverified.
 - **The popcorn regression** (§7) is unresolved. The fix that worked for v5 came
@@ -445,7 +445,7 @@ engineering closes that gap.
 
 ## 14. Data and tooling
 
-**WCS Camera Traps**, via [LILA BC](https://lila.science/datasets/wcscameratraps) —
+**WCS Camera Traps**, via [LILA BC](https://lila.science/datasets/wcscameratraps):
 1,369,991 images, 675 species, 12 countries, roughly 50% empty. Contributed by the
 Wildlife Conservation Society, released under the Community Data License Agreement.
 Bounding boxes from `wcs_20220205_bboxes_with_classes`; splits from `wcs_splits.json`.
@@ -457,12 +457,12 @@ Only annotations with `sequence_level_annotation: False` were trusted for size
 analysis, since sequence-level labels propagate across bursts and are unreliable
 per-frame.
 
-**MegaDetector v5a** — Dan Morris and contributors, developed at Microsoft AI for
+**MegaDetector v5a** by Dan Morris and contributors, developed at Microsoft AI for
 Earth, now community-maintained.
 
-**OpenCLIP** ViT-B-32 — LAION and contributors.
+**OpenCLIP** ViT-B-32 by LAION and contributors.
 
-**iWildCam 2020** — used for v2 through v5, via the `qitvision/iwildcam2020-256`
+**iWildCam 2020**, used for v2 through v5, via the `qitvision/iwildcam2020-256`
 Kaggle mirror. Note this mirror is pre-shrunk to 256px, meaning training images were
 downsized twice.
 
@@ -476,8 +476,8 @@ Training on Google Colab (Tesla T4). Deployment via Streamlit.
    disjoint evaluation is not optional for this data.
 2. Detection accuracy has a sharp threshold at ~5% of frame, driven by the resize
    step destroying sub-feature-map-cell detail. 73% of misses are small animals.
-3. Raising input resolution at inference time *fails* — calibration collapses faster
-   than discrimination improves. The underlying gain is real but must be realised
+3. Raising input resolution at inference time *fails*, because calibration collapses
+   faster than discrimination improves. The underlying gain is real but must be realised
    through fine-tuning at the target resolution. Predicted +0.0215, observed +0.0236.
 4. Hard negative mining from training locations degraded performance at every
    operating point.

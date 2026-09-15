@@ -9,8 +9,6 @@ on how likely it is to contain an animal, so the empty ones can be set aside.
 **96.2% accuracy** on 2,961 images from 314 camera locations excluded from all
 training and tuning.
 
-**Live demo:** _add your Streamlit Cloud URL here_
-
 ---
 
 ## How it works
@@ -38,13 +36,13 @@ models is flagged rather than hidden.
 
 ## Results
 
-On the held-out test split — 314 camera locations that appear nowhere in training and
-were never used to tune any parameter:
+On the held-out test split of 314 camera locations that appear nowhere in training
+and were never used to tune any parameter:
 
 | | AUC | Accuracy |
 |---|---|---|
-| ResNet18 v6 alone | 0.9669 | — |
-| MegaDetector alone | 0.9687 | — |
+| ResNet18 v6 alone | 0.9669 | n/a |
+| MegaDetector alone | 0.9687 | n/a |
 | **Blended** | **0.9909** | **96.15%** |
 
 MegaDetector alone outperforms this project's classifier. The blend beats both
@@ -102,7 +100,7 @@ The ResNet weights (`v6_320.pth`, 45 MB) ship with the repo. MegaDetector's weig
 
 - Animals under 5% of frame are detected substantially less reliably
 - Presence/absence only, no species identification
-- No "uncertain" output — every image is forced into one of two labels
+- No "uncertain" output; every image is forced into one of two labels
 - People and vehicles count as *not animals*, following the source dataset
 - Unreliable on anything that isn't camera-trap imagery
 - Realistic replicas and decoys are classified as animals
@@ -114,14 +112,14 @@ The ResNet weights (`v6_320.pth`, 45 MB) ship with the repo. MegaDetector's weig
 
 Built by Jven Deepak.
 
-- [MegaDetector v5a](https://github.com/agentmorris/MegaDetector) — Dan Morris and
+- [MegaDetector v5a](https://github.com/agentmorris/MegaDetector) by Dan Morris and
   contributors, developed at Microsoft AI for Earth, now community-maintained
-- [WCS Camera Traps](https://lila.science/datasets/wcscameratraps) — 1.37M images
+- [WCS Camera Traps](https://lila.science/datasets/wcscameratraps), 1.37M images
   contributed by the [Wildlife Conservation Society](https://www.wcs.org/), hosted by
   [LILA BC](https://lila.science/) under the Community Data License Agreement
-- [OpenCLIP](https://github.com/mlfoundations/open_clip) (ViT-B-32) — LAION and
+- [OpenCLIP](https://github.com/mlfoundations/open_clip) (ViT-B-32) by LAION and
   contributors
-- [iWildCam 2020](https://www.kaggle.com/c/iwildcam-2020-fgvc7) — used for earlier
+- [iWildCam 2020](https://www.kaggle.com/c/iwildcam-2020-fgvc7), used for earlier
   model versions
 
 A research and portfolio project, not a production conservation tool.
